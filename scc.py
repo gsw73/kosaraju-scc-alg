@@ -28,14 +28,9 @@ def clock( func ):
     return wrapper
 
 @clock
-def myListSort( edgeList ):
-    edgeList.sort()
-    return
-
-@clock
-def getEdgesFromFile( inputFile ):
-    gForward = []
-    gReverse = []
+def getEdgesFromFile( inputFile, n ):
+    fGraph = [ array.array( 'i', [] ) for edge in range( n + 1 ) ]
+    rGraph = [ array.array( 'i', [] ) for edge in range( n + 1 ) ]
 
     # read file, converting each line into an array
     with open( inputFile, 'rt' ) as fin:
@@ -43,22 +38,23 @@ def getEdgesFromFile( inputFile ):
             line = fin.readline()
             if not line:
                 break
-            ( i, j ) = line.split()
-            f = array.array( 'i', ( int( i ), int( j ) ) )
-            r = array.array( 'i', ( int( j ), int( i ) ) )
-            gForward.append( f )
-            gReverse.append( r )
+            ( tail, head ) = tuple( int( val ) for val in line.split() )
 
-    return gForward, gReverse
+            # forward graph goes from tail to head
+            fGraph[ tail ].append( head )
+
+            # reverse graph goes from head to tail
+            rGraph[ head ].append( tail )
+
+    return fGraph, rGraph
 
 @clock
 def DFSLoop( graph, n ):
     stack = collections.deque()
     t = 0
-    lengthOfGraph = len( graph )
-    seen = array.array( 'i', ( 0 for i in range( lengthOfGraph ) ) )
-    finishingTimes = array.array( 'i', ( 0 for i in range( lengthOfGraph ) ) )
-    leaderFreq = array.array( 'i', ( 0 for i in range( lengthOfGraph ) ) )
+    seen = array.array( 'i', ( 0 for i in range( n + 1 ) ) )
+    finishingTimes = array.array( 'i', ( 0 for i in range( n + 1 ) ) )
+    leaderFreq = array.array( 'i', ( 0 for i in range( n + 1 ) ) )
 
     for i in range( n, 0, -1 ):
         leaderNodeS = i
@@ -73,7 +69,7 @@ def DFSLoop( graph, n ):
             seen[ node ] = 1
 
             try:
-                arc = graph[ node ].pop()
+                head = graph[ node ].pop()
 
             except IndexError:
                 t += 1
@@ -87,37 +83,39 @@ def DFSLoop( graph, n ):
                     break
 
             else:
-                tail = arc[ 1 ]
-                if seen[ tail ]:
+                if seen[ head ]:
                     continue
 
                 else:
                     stack.appendleft( node )
-                    node = tail
+                    node = head
 
     return finishingTimes, leaderFreq
 
 @clock
-def swapInFinishingTimes( finishTimes, graph ):
-    ftGraph = []
-    for el in graph:
-        ftEl = array.array( 'i', ( finishTimes[ el[ 0 ] ], finishTimes[ el[ 1 ] ] ) )
-        ftGraph.append( ftEl )
-    return ftGraph
+def subFinishingTimes( finishTimes, gForward, n ):
+    # this implementation creates a new outer structure, but resuses
+    # the head array rows after renumbering them
 
-@clock
-def genDFSstructure( graphFlat, n ):
-    graphStruct = [ [] for i in range( n + 1 ) ]
+    graph = [ None for i in range( n + 1 ) ]
 
-    for el in graphFlat:
-        graphStruct[ el[ 0 ] ].append( el )
+    for tail in range( len( gForward ) ):
 
-    return graphStruct
+        # swap out all the heads in that row for new FT
+        for i in range( len( gForward[ tail ] ) ):
+            head = gForward[ tail ][ i ]
+            gForward[ tail ][ i ] = finishTimes[ head ]
+
+        # add FT head array new list using FT tail
+        graph[ finishTimes[ tail ] ] = gForward[ tail ]
+
+    return graph
 
 def usage():
     print( 'my_prompt> python3 scc.py <nodes> <filename>' )
     return
 
+@clock
 def main():
     if len( sys.argv ) < 3:
         usage()
@@ -127,30 +125,26 @@ def main():
     n = int( sys.argv[ 1 ] )
     inputFileName = sys.argv[ 2 ]
 
-    # read edges from file
-    gForward, gReverse = getEdgesFromFile( inputFileName )
-
-    # gForward will be in order, but gReverse needs to be sorted
-    myListSort( gReverse )
-
-    # put into list such that all tail edges are grouped in list on same row;
-    # e.g., row 1 has [ (1,x), (1,y), (1,z),... ]
-    dfsGraphReverse = genDFSstructure( gReverse, n )
+    # read edges from file into reverse graph and forward graph
+    # (I destroy reverse graph during DFS loops so need forward copy)
+    gForward, gReverse = getEdgesFromFile( inputFileName, n )
 
     # calculate finishing times of reverse graph
-    finishingTimesArray, leaderFreqArray = DFSLoop( dfsGraphReverse, n )
+    # this destroys the reverse graph's head arrays
+    finishingTimesArray, leaderFreqArray = DFSLoop( gReverse, n )
+
+    # explicitly free destroyed list
+    gReverse = []
 
     # substitute forward node numbers with finishing time numbers
-    gForwardRenumbered = swapInFinishingTimes( finishingTimesArray, gForward )
+    # this destroys the forward graph by changing the head arrays
+    gForwardRenumbered = subFinishingTimes( finishingTimesArray, gForward, n )
 
-    # sort renumbered forward graph
-    myListSort( gForwardRenumbered )
-
-    # put graph into structure for DFS
-    dfsGraphForward = genDFSstructure( gForwardRenumbered, n )
+    # explicitly free destroyed list
+    gForward = []
 
     # call DFS Loop on forward graph
-    fta, lfa = DFSLoop( dfsGraphForward, n )
+    fta, lfa = DFSLoop( gForwardRenumbered, n )
 
     # just need top leaders
     lfaRevSort = sorted( lfa, reverse = True )
